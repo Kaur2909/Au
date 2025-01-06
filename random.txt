@@ -20,34 +20,36 @@ public class MessageMasterController {
     private MessageMasterService messageMasterService;
 
     @PostMapping("/save")
-    public ResponseEntity<ReqRes> saveMessageCodes() {
+    public ResponseEntity<ReqRes> saveMessageCodes(@RequestBody MessageMasterDTO messageMasterDTO) {
         ReqRes response = new ReqRes();
         try {
-            messageMasterService.saveInitialMessageCodes();
+            messageMasterService.saveMessageCode(messageMasterDTO);
             response.setStatusCode(200);
-            response.setMessage("Message codes saved successfully");
+            response.setMessage("Message code saved successfully");
             CompletableFuture.runAsync(() -> {
-                auditTrailService.logAuditTrail("Message codes saved", "SUCCESS", "Initial message codes saved");
+                String details = String.format("Code: %s, Message: %s", messageMasterDTO.getCode(), messageMasterDTO.getMessageString());
+                auditTrailService.logAuditTrail("Message code saved", "SUCCESS", details);
             });
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error saving message codes", e);
+            logger.error("Error saving message code", e);
             response.setStatusCode(500);
             response.setError(e.getMessage());
-            response.setMessage("Failed to save message codes");
+            response.setMessage("Failed to save message code");
             return ResponseEntity.status(500).body(response);
         }
     }
 
-    @PutMapping("/update")
-    public ResponseEntity<ReqRes> updateMessageCode(@RequestBody MessageCode messageCode) {
+    @PutMapping("/update/{code}")
+    public ResponseEntity<ReqRes> updateMessageCode(@PathVariable String code, @RequestBody MessageMasterDTO messageMasterDTO) {
         ReqRes response = new ReqRes();
         try {
-            messageMasterService.updateMessageCode(messageCode);
+            messageMasterService.updateMessageCode(code, messageMasterDTO);
             response.setStatusCode(200);
             response.setMessage("Message code updated successfully");
             CompletableFuture.runAsync(() -> {
-                auditTrailService.logAuditTrail("Message code updated", "SUCCESS", "Code: " + messageCode.getCode());
+                String details = String.format("Code: %s, New Message: %s", code, messageMasterDTO.getMessageString());
+                auditTrailService.logAuditTrail("Message code updated", "SUCCESS", details);
             });
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -79,128 +81,91 @@ public class MessageMasterController {
         }
     }
 
-    @GetMapping("/all")
-    public ResponseEntity<ReqRes> getAllMessageCodes() {
-        ReqRes response = new ReqRes();
+    @GetMapping("/search")
+    public ResponseEntity<ResponseWrapper<List<MessageCode>>> searchMessageCodes(@RequestParam(required = false) String keyword) {
         try {
-            List<MessageCode> codes = messageMasterService.getAllMessageCodes();
-            response.setStatusCode(200);
-            response.setMessage("Message codes fetched successfully");
-            response.setData(codes);
-            return ResponseEntity.ok(response);
+            List<MessageCode> codes = messageMasterService.searchMessageCodes(keyword);
+            ResponseWrapper<List<MessageCode>> responseWrapper = new ResponseWrapper<>(codes);
+            return ResponseEntity.ok(responseWrapper);
         } catch (Exception e) {
-            logger.error("Error fetching message codes", e);
-            response.setStatusCode(500);
-            response.setError(e.getMessage());
-            response.setMessage("Failed to fetch message codes");
-            return ResponseEntity.status(500).body(response);
+            logger.error("Error searching message codes", e);
+            return ResponseEntity.status(500).body(new ResponseWrapper<>("Failed to fetch message codes"));
         }
     }
 }
 
+// MessageMasterService Implementation
 package com.example.service;
 
-import com.example.dao.MessageMasterDao;
+import com.example.dto.MessageMasterDTO;
 import com.example.entity.MessageCode;
+import com.example.repository.MessageMasterRepository;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import javax.annotation.PostConstruct;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class MessageMasterService {
 
+    private static final Logger logger = LogManager.getLogger(MessageMasterService.class);
+
     @Autowired
-    private MessageMasterDao messageMasterDao;
+    private MessageMasterRepository messageMasterRepository;
 
-    private static final List<MessageCode> INITIAL_CODES = Arrays.asList(
-            new MessageCode("A", "A-Always"),
-            new MessageCode("P", "P-Paid Only"),
-            new MessageCode("R", "R-Reject Only"),
-            new MessageCode("C", "C-Captured Only")
-    );
-
-    @PostConstruct
-    public void saveInitialMessageCodes() {
-        INITIAL_CODES.forEach(code -> {
-            if (!messageMasterDao.existsByCode(code.getCode())) {
-                messageMasterDao.save(code);
-            }
-        });
+    public void saveMessageCode(MessageMasterDTO messageMasterDTO) {
+        try {
+            MessageCode messageCode = new MessageCode();
+            messageCode.setCode(messageMasterDTO.getCode());
+            messageCode.setDescription(messageMasterDTO.getMessageString());
+            messageMasterRepository.save(messageCode);
+        } catch (Exception e) {
+            logger.error("Failed to save message code", e);
+            throw new RuntimeException("Error while saving message code", e);
+        }
     }
 
-    public void updateMessageCode(MessageCode messageCode) {
-        if (messageMasterDao.existsByCode(messageCode.getCode())) {
-            messageMasterDao.save(messageCode);
+    public void updateMessageCode(String code, MessageMasterDTO messageMasterDTO) {
+        try {
+            Optional<MessageCode> optionalMessageCode = messageMasterRepository.findByCode(code);
+            if (optionalMessageCode.isPresent()) {
+                MessageCode messageCode = optionalMessageCode.get();
+                messageCode.setDescription(messageMasterDTO.getMessageString());
+                messageMasterRepository.save(messageCode);
+            } else {
+                throw new RuntimeException("Message code not found");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to update message code", e);
+            throw new RuntimeException("Error while updating message code", e);
         }
     }
 
     public void deleteMessageCode(String code) {
-        messageMasterDao.deleteByCode(code);
+        try {
+            messageMasterRepository.deleteByCode(code);
+        } catch (Exception e) {
+            logger.error("Failed to delete message code", e);
+            throw new RuntimeException("Error while deleting message code", e);
+        }
     }
 
-    public List<MessageCode> getAllMessageCodes() {
-        return messageMasterDao.findAll();
+    public List<MessageCode> searchMessageCodes(String keyword) {
+        if (keyword == null || keyword.isEmpty()) {
+            return messageMasterRepository.findAllByOrderByMsgRidDesc();
+        } else {
+            return messageMasterRepository.findByCodeContainingIgnoreCaseOrDescriptionContainingIgnoreCase(keyword, keyword);
+        }
     }
 }
 
 
-
-package com.example.dao;
-
-import com.example.entity.MessageCode;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-@Repository
-public interface MessageMasterDao extends JpaRepository<MessageCode, Long> {
-    boolean existsByCode(String code);
+   Optional<MessageCode> findByCode(String code);
+    
     void deleteByCode(String code);
-}
-
-package com.example.entity;
-
-import javax.persistence.*;
-
-@Entity
-public class MessageCode {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long msg_rid;
-
-    private String code;
-    private String description;
-
-    public MessageCode() {}
-
-    public MessageCode(String code, String description) {
-        this.code = code;
-        this.description = description;
-    }
-
-    public Long getMsgRid() {
-        return msg_rid;
-    }
-
-    public void setMsgRid(Long msg_rid) {
-        this.msg_rid = msg_rid;
-    }
-
-    public String getCode() {
-        return code;
-    }
-
-    public void setCode(String code) {
-        this.code = code;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-}
+    
+    List<MessageCode> findByCodeContainingIgnoreCaseOrDescriptionContainingIgnoreCase(String codeKeyword, String descriptionKeyword);
+    
+    List<MessageCode> findAllByOrderByMsgRidDesc();
