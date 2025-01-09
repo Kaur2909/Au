@@ -1,7 +1,47 @@
-@Query("SELECT u FROM User u WHERE " +
-       "( (:keyword IS NULL OR :keyword = '') OR " +
-       "  LOWER(u.userFirstName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-       "  LOWER(u.userLastName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-       "  LOWER(u.userName) LIKE LOWER(CONCAT('%', :keyword, '%')) ) AND " +
-       "( :isActive IS NULL OR u.isActiveUser = :isActive )")
-List<User> searchUsersByKeywordAndStatus(@Param("keyword") String keyword, @Param("isActive") Boolean isActive);
+private UserDTO mapToUserDTO(User user) {
+    if (user == null) {
+        return null;
+    }
+
+    // Null check for managerId
+    Integer managerId = (user.getManager() != null && user.getManager().getUserRid() != null)
+            ? user.getManager().getUserRid()
+            : null;
+
+    // Null-safe initialization of UserDTO
+    UserDTO userDTO = new UserDTO(
+        user.getUserName() != null ? user.getUserName() : "",
+        user.getUserFirstName() != null ? user.getUserFirstName() : "",
+        user.getUserLastName() != null ? user.getUserLastName() : "",
+        user.getUserEmail() != null ? user.getUserEmail() : "",
+        user.getUserRid() != 0 ? user.getUserRid() : 0,
+        managerId,
+        (user.getLocation() != null && user.getLocation().getLocId() != null) ? user.getLocation().getLocId() : 0L
+    );
+
+    // Null checks for user roles and mapping them
+    if (user.getUserRoles() != null) {
+        userDTO.setRoles(
+            user.getUserRoles().stream()
+                .filter(userRole -> userRole != null && userRole.getRole() != null)
+                .map(userRole -> mapToRoleDTO(userRole.getRole()))
+                .collect(Collectors.toList())
+        );
+    } else {
+        userDTO.setRoles(Collections.emptyList());
+    }
+
+    // Null checks for network types and mapping them
+    if (user.getNetworkTypes() != null) {
+        userDTO.setNetworkType(
+            user.getNetworkTypes().stream()
+                .filter(networkType -> networkType != null)
+                .map(this::mapToNetworkTypeDTO)
+                .collect(Collectors.toList())
+        );
+    } else {
+        userDTO.setNetworkType(Collections.emptyList());
+    }
+
+    return userDTO;
+}
